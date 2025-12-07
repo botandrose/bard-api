@@ -2,10 +2,10 @@ PATH
   remote: .
   specs:
     bard-api (0.1.0)
-      backhoe (~> 0.10)
-      http (~> 5.0)
-      jwt (~> 2.7)
-      rack (~> 3.0)
+      backhoe
+      http
+      jwt
+      rack
 
 GEM
   remote: https://rubygems.org/
@@ -56,7 +56,7 @@ GEM
     i18n (1.14.7)
       concurrent-ruby (~> 1.0)
     json (2.17.1)
-    jwt (2.10.2)
+    jwt (3.1.2)
       base64
     llhttp-ffi (0.5.1)
       ffi-compiler (~> 1.0)
@@ -93,7 +93,7 @@ PLATFORMS
 
 DEPENDENCIES
   bard-api!
-  rack-test (~> 2.1)
+  rack-test
   rake (~> 13.0)
   rspec (~> 3.0)
 

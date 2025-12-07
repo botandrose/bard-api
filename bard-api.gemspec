@@ -31,13 +31,13 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   # Dependencies
-  spec.add_dependency "jwt", "~> 2.7"
-  spec.add_dependency "rack", "~> 3.0"
-  spec.add_dependency "http", "~> 5.0"
-  spec.add_dependency "backhoe", "~> 0.10"
+  spec.add_dependency "jwt"
+  spec.add_dependency "rack"
+  spec.add_dependency "http"
+  spec.add_dependency "backhoe"
 
   # Development dependencies
-  spec.add_development_dependency "rack-test", "~> 2.1"
+  spec.add_development_dependency "rack-test"
 
   # For more information and examples about making a new gem, check out our
   # guide at: https://bundler.io/guides/creating_gem.html
