@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
 require "backhoe"
-require "http"
+require "net/http"
+require "uri"
 require "time"
 require "fileutils"
 
@@ -82,11 +83,19 @@ module Bard
       private
 
       def upload_to_url(url, file_path)
-        File.open(file_path, "rb") do |file|
-          response = HTTP.put(url, body: file)
+        uri = URI.parse(url)
 
-          unless response.status.success?
-            raise BackupError, "Upload failed with status #{response.status}: #{response.body}"
+        File.open(file_path, "rb") do |file|
+          request = Net::HTTP::Put.new(uri)
+          request.body = file.read
+          request.content_type = "application/octet-stream"
+
+          response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme == "https") do |http|
+            http.request(request)
+          end
+
+          unless response.is_a?(Net::HTTPSuccess)
+            raise BackupError, "Upload failed with status #{response.code}: #{response.body}"
           end
         end
       end

@@ -56,13 +56,17 @@ RSpec.describe Bard::Api::App do
     end
 
     it "triggers a backup with valid token" do
-      # Mock Backhoe.dump and HTTP.put
+      # Mock Backhoe.dump and Net::HTTP
       allow(Backhoe).to receive(:dump) do |path|
         File.write(path, "fake dump data")
       end
 
-      mock_response = double("HTTP::Response", status: double(success?: true))
-      allow(HTTP).to receive(:put).and_return(mock_response)
+      mock_response = double("Net::HTTPSuccess", code: "200", body: "")
+      allow(mock_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+
+      mock_http = double("Net::HTTP")
+      allow(mock_http).to receive(:request).and_return(mock_response)
+      allow(Net::HTTP).to receive(:start).and_yield(mock_http)
 
       token = generate_token(urls: [presigned_url])
       header "Authorization", "Bearer #{token}"

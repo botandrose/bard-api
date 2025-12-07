@@ -33,7 +33,6 @@ Gem::Specification.new do |spec|
   # Dependencies
   spec.add_dependency "jwt"
   spec.add_dependency "rack"
-  spec.add_dependency "http"
   spec.add_dependency "backhoe"
 
   # Development dependencies
