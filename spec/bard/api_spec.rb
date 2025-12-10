@@ -27,7 +27,6 @@ RSpec.describe Bard::Api::App do
 
   describe "POST /backups" do
     let(:private_key) { OpenSSL::PKey::RSA.new(File.read("#{Dir.pwd}/keys/private_key.pem")) }
-    let(:presigned_url) { "https://s3.amazonaws.com/bucket/backup.sql.gz?signature=abc123" }
 
     def generate_token(urls:)
       JWT.encode(
@@ -56,19 +55,16 @@ RSpec.describe Bard::Api::App do
     end
 
     it "triggers a backup with valid token" do
-      # Mock Backhoe.dump and Net::HTTP
-      allow(Backhoe).to receive(:dump) do |path|
-        File.write(path, "fake dump data")
-      end
+      backup_instance = Bard::Backup.new(
+        timestamp: Time.now.utc,
+        size: 123,
+        destinations: [
+          { name: "bard", type: "bard", status: "success" }
+        ]
+      )
+      allow(Bard::Backup).to receive(:create!).and_return(backup_instance)
 
-      mock_response = double("Net::HTTPSuccess", code: "200", body: "")
-      allow(mock_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
-
-      mock_http = double("Net::HTTP")
-      allow(mock_http).to receive(:request).and_return(mock_response)
-      allow(Net::HTTP).to receive(:start).and_yield(mock_http)
-
-      token = generate_token(urls: [presigned_url])
+      token = generate_token(urls: ["https://example.com"])
       header "Authorization", "Bearer #{token}"
       post "/backups"
 
@@ -103,6 +99,7 @@ RSpec.describe Bard::Api::App do
     end
 
     it "returns 404 when no backups exist" do
+      allow(Bard::Backup).to receive(:latest).and_raise(Bard::Backup::NotFound, "No backups found")
       token = generate_token
       header "Authorization", "Bearer #{token}"
       get "/backups/latest"

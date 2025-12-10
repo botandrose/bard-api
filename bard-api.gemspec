@@ -34,6 +34,8 @@ Gem::Specification.new do |spec|
   spec.add_dependency "jwt"
   spec.add_dependency "rack"
   spec.add_dependency "backhoe"
+  spec.add_dependency "bard"
+  spec.add_dependency "bard-backup"
 
   # Development dependencies
   spec.add_development_dependency "rack-test"

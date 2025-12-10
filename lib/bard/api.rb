@@ -1,8 +1,6 @@
 # frozen_string_literal: true
 
 require_relative "api/version"
-require_relative "api/auth"
-require_relative "api/backup"
 require_relative "api/app"
 
 module Bard

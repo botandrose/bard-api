@@ -80,14 +80,21 @@ Authorization: Bearer <jwt-token>
 ```json
 {
   "timestamp": "2025-12-06T10:30:00Z",
-  "size": 123456789,
   "destinations": [
     {
       "name": "primary",
       "type": "s3",
-      "status": "success"
+      "path": "bard-backup/my-app",
+      "region": "us-west-2"
     }
   ]
+}
+```
+
+**Response (404 Not Found):**
+```json
+{
+  "error": "No backups found"
 }
 ```
 

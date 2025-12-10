@@ -3,7 +3,7 @@
 require "rack"
 require "json"
 require_relative "auth"
-require_relative "backup"
+require "bard/backup"
 
 module Bard
   module Api
@@ -24,7 +24,7 @@ module Bard
           not_found
         end
       rescue => e
-        internal_error(e)
+        json_response(500, { error: e.message })
       end
 
       private
@@ -35,34 +35,18 @@ module Bard
 
       def create_backup(request)
         with_auth(request) do |payload|
-          # Extract URLs from the JWT payload
-          urls = payload["urls"]
-          raise "Missing 'urls' in token payload" if urls.nil? || urls.empty?
-
-          # Perform the backup
-          backup = Backup.new
-          result = backup.perform(urls)
-
-          json_response(200, result)
+          backup = Bard::Backup.create!(urls: payload["urls"])
+          json_response(200, backup.as_json)
         end
-      rescue => e
-        json_response(500, { error: "Backup failed: #{e.message}" })
       end
 
       def latest_backup(request)
         with_auth(request) do
-          # Get the latest backup status
-          backup = Backup.new
-          result = backup.latest
-
-          if result
-            json_response(200, result)
-          else
-            json_response(404, { error: "No backups found" })
-          end
+          backup = Bard::Backup.latest
+          json_response(200, backup.as_json)
         end
-      rescue => e
-        json_response(500, { error: e.message })
+      rescue Bard::Backup::NotFound => e
+        json_response(404, { error: e.message })
       end
 
       def with_auth(request)
@@ -78,10 +62,6 @@ module Bard
 
       def not_found
         json_response(404, { error: "Not found" })
-      end
-
-      def internal_error(e)
-        json_response(500, { error: "Internal server error: #{e.message}" })
       end
     end
   end
