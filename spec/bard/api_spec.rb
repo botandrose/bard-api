@@ -62,7 +62,11 @@ RSpec.describe Bard::Api::App do
           { name: "bard", type: "bard", status: "success" }
         ]
       )
-      allow(Bard::Backup).to receive(:create!).and_return(backup_instance)
+      allow(Bard::Backup).to receive(:create!).with(
+        name: "bard",
+        type: :upload,
+        urls: ["https://example.com"]
+      ).and_return(backup_instance)
 
       token = generate_token(urls: ["https://example.com"])
       header "Authorization", "Bearer #{token}"

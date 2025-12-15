@@ -35,11 +35,11 @@ module Bard
 
       def create_backup(request)
         with_auth(request) do |payload|
-          backup = Bard::Backup.create!({
+          backup = Bard::Backup.create!(
             name: "bard",
             type: :upload,
             urls: payload["urls"]
-          })
+          )
           json_response(200, backup.as_json)
         end
       end
