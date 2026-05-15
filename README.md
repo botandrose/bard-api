@@ -98,6 +98,36 @@ Authorization: Bearer <jwt-token>
 }
 ```
 
+#### GET /bard-api/config
+
+Read the project's live backup and uptime configuration (requires JWT authentication). Used by axis to discover what each project actually has deployed.
+
+**Headers:**
+```
+Authorization: Bearer <jwt-token>
+```
+
+**Response (200 OK):**
+```json
+{
+  "project_name": "my-app",
+  "backup": {
+    "enabled": true,
+    "bard_managed": true,
+    "self_managed": false,
+    "encryption_enabled": true,
+    "destinations": [
+      { "name": "primary", "type": "s3" }
+    ]
+  },
+  "servers": {
+    "production": { "pings": ["https://my-app.example.com/health"] }
+  }
+}
+```
+
+Destination entries expose only `name` and `type`; bucket paths, regions, and credentials are never serialized. `servers` is `{}` when no production server is configured.
+
 ### Authentication
 
 The API uses JWT with asymmetric RSA keys for authentication. The public key is embedded in the gem, and only BARD Tracker with the private key can create valid tokens.

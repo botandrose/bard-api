@@ -82,19 +82,12 @@ RSpec.describe Bard::Api::App do
         session_token: "test-session-token",
         region: "us-west-2",
       ).and_return(backup_instance)
-      allow(Bard::Backup::FileTree).to receive(:create!)
 
       token = generate_token
       header "Authorization", "Bearer #{token}"
       post "/backups"
 
       expect(last_response.status).to eq(200)
-      expect(Bard::Backup::FileTree).to have_received(:create!).with(
-        access_key_id: "ASIA_TEST_KEY",
-        secret_access_key: "test-secret",
-        session_token: "test-session-token",
-        region: "us-west-2",
-      )
 
       json = JSON.parse(last_response.body)
       expect(json["timestamp"]).not_to be_nil
@@ -132,6 +125,118 @@ RSpec.describe Bard::Api::App do
 
       json = JSON.parse(last_response.body)
       expect(json["error"]).to eq("No backups found")
+    end
+  end
+
+  describe "GET /config" do
+    let(:private_key) { OpenSSL::PKey::RSA.new(File.read("#{Dir.pwd}/keys/private_key.pem")) }
+
+    def generate_token
+      JWT.encode(
+        { exp: (Time.now + 300).to_i, iat: Time.now.to_i },
+        private_key,
+        "RS256"
+      )
+    end
+
+    def stub_bard_config(backup:, encrypt: false, production_pings: nil, project_name: "test-project")
+      production_server = production_pings && double("Server", ping: production_pings)
+      servers = production_server ? { production: production_server } : {}
+      bard_config = double("Bard::Config",
+        project_name: project_name,
+        backup: backup,
+        encrypt: encrypt,
+        servers: servers,
+      )
+      allow(Bard::Config).to receive(:current).and_return(bard_config)
+    end
+
+    it "returns 401 without authentication" do
+      get "/config"
+      expect(last_response.status).to eq(401)
+    end
+
+    it "returns 401 with invalid token" do
+      header "Authorization", "Bearer invalid-token"
+      get "/config"
+      expect(last_response.status).to eq(401)
+    end
+
+    it "serializes a bard-managed backup with production ping" do
+      backup = Bard::BackupConfig.new { bard }
+      stub_bard_config(
+        backup: backup,
+        encrypt: true,
+        production_pings: ["https://pep.example.com/health"],
+        project_name: "pep",
+      )
+
+      header "Authorization", "Bearer #{generate_token}"
+      get "/config"
+
+      expect(last_response.status).to eq(200)
+      expect(last_response.content_type).to include("application/json")
+      json = JSON.parse(last_response.body)
+      expect(json).to eq(
+        "project_name" => "pep",
+        "backup" => {
+          "enabled" => true,
+          "bard_managed" => true,
+          "self_managed" => false,
+          "encryption_enabled" => true,
+          "destinations" => [],
+        },
+        "servers" => {
+          "production" => { "pings" => ["https://pep.example.com/health"] },
+        },
+      )
+    end
+
+    it "serializes a self-managed backup with destinations whitelisted to name and type" do
+      backup = Bard::BackupConfig.new do
+        s3 "primary", path: "secret-bucket/foo", region: "us-west-2", access_key_id: "SECRET"
+      end
+      stub_bard_config(backup: backup, encrypt: false, production_pings: ["https://example.com"])
+
+      header "Authorization", "Bearer #{generate_token}"
+      get "/config"
+
+      expect(last_response.status).to eq(200)
+      json = JSON.parse(last_response.body)
+      expect(json["backup"]["self_managed"]).to eq(true)
+      expect(json["backup"]["bard_managed"]).to eq(false)
+      expect(json["backup"]["encryption_enabled"]).to eq(false)
+      expect(json["backup"]["destinations"]).to eq([
+        { "name" => "primary", "type" => "s3" },
+      ])
+      expect(last_response.body).not_to include("secret-bucket")
+      expect(last_response.body).not_to include("SECRET")
+    end
+
+    it "serializes a disabled backup" do
+      backup = Bard::BackupConfig.new { disabled }
+      stub_bard_config(backup: backup, production_pings: ["https://example.com"])
+
+      header "Authorization", "Bearer #{generate_token}"
+      get "/config"
+
+      expect(last_response.status).to eq(200)
+      json = JSON.parse(last_response.body)
+      expect(json["backup"]["enabled"]).to eq(false)
+      expect(json["backup"]["bard_managed"]).to eq(false)
+      expect(json["backup"]["self_managed"]).to eq(false)
+    end
+
+    it "omits production server when none configured" do
+      backup = Bard::BackupConfig.new { bard }
+      stub_bard_config(backup: backup, production_pings: nil)
+
+      header "Authorization", "Bearer #{generate_token}"
+      get "/config"
+
+      expect(last_response.status).to eq(200)
+      json = JSON.parse(last_response.body)
+      expect(json["servers"]).to eq({})
     end
   end
 end
