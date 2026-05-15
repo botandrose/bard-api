@@ -20,6 +20,8 @@ module Bard
           create_backup(request)
         when ["GET", "/backups/latest"]
           latest_backup(request)
+        when ["GET", "/config"]
+          config(request)
         else
           not_found
         end
@@ -51,6 +53,28 @@ module Bard
         end
       rescue Bard::Backup::NotFound => e
         json_response(404, { error: e.message })
+      end
+
+      def config(request)
+        with_auth(request) do
+          json_response(200, serialize_config(Bard::Config.current))
+        end
+      end
+
+      def serialize_config(bard_config)
+        backup = bard_config.backup
+        production = bard_config.servers[:production]
+        {
+          project_name: bard_config.project_name,
+          backup: {
+            enabled: backup.enabled?,
+            bard_managed: backup.bard?,
+            self_managed: backup.self_managed?,
+            encryption_enabled: bard_config.respond_to?(:encrypt) && !!bard_config.encrypt,
+            destinations: backup.destinations.map { |d| { name: d[:name], type: d[:type] } },
+          },
+          servers: production ? { production: { pings: Array(production.ping) } } : {},
+        }
       end
 
       def with_auth(request)
