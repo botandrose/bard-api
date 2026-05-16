@@ -4,6 +4,8 @@ require "rack"
 require "json"
 require_relative "auth"
 require "bard/backup"
+require "bard/plugins/backup"
+require "bard/plugins/encrypt"
 
 module Bard
   module Api
@@ -63,17 +65,17 @@ module Bard
 
       def serialize_config(bard_config)
         backup = bard_config.backup
-        production = bard_config.servers[:production]
+        production = bard_config.targets[:production]
         {
           project_name: bard_config.project_name,
           backup: {
             enabled: backup.enabled?,
             bard_managed: backup.bard?,
             self_managed: backup.self_managed?,
-            encryption_enabled: bard_config.respond_to?(:encrypt) && !!bard_config.encrypt,
+            encryption_enabled: !!bard_config.encrypt,
             destinations: backup.destinations.map { |d| { name: d[:name], type: d[:type] } },
           },
-          servers: production ? { production: { pings: Array(production.ping) } } : {},
+          servers: production ? { production: { pings: production.ping } } : {},
         }
       end
 

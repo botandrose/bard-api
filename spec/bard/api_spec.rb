@@ -126,15 +126,8 @@ RSpec.describe Bard::Api::App do
       )
     end
 
-    def stub_bard_config(backup:, encrypt: false, production_pings: nil, project_name: "test-project")
-      production_server = production_pings && double("Server", ping: production_pings)
-      servers = production_server ? { production: production_server } : {}
-      bard_config = double("Bard::Config",
-        project_name: project_name,
-        backup: backup,
-        encrypt: encrypt,
-        servers: servers,
-      )
+    def stub_bard_config(source, project_name: "test-project")
+      bard_config = Bard::Config.new(project_name, source: source)
       allow(Bard::Config).to receive(:current).and_return(bard_config)
     end
 
@@ -150,13 +143,13 @@ RSpec.describe Bard::Api::App do
     end
 
     it "serializes a bard-managed backup with production ping" do
-      backup = Bard::BackupConfig.new { bard }
-      stub_bard_config(
-        backup: backup,
-        encrypt: true,
-        production_pings: ["https://pep.example.com/health"],
-        project_name: "pep",
-      )
+      stub_bard_config(<<~RUBY, project_name: "pep")
+        target :production do
+          ping "https://pep.example.com/health"
+        end
+        backup { bard }
+        encrypt true
+      RUBY
 
       header "Authorization", "Bearer #{generate_token}"
       get "/config"
@@ -180,10 +173,14 @@ RSpec.describe Bard::Api::App do
     end
 
     it "serializes a self-managed backup with destinations whitelisted to name and type" do
-      backup = Bard::BackupConfig.new do
-        s3 "primary", path: "secret-bucket/foo", region: "us-west-2", access_key_id: "SECRET"
-      end
-      stub_bard_config(backup: backup, encrypt: false, production_pings: ["https://example.com"])
+      stub_bard_config(<<~RUBY)
+        target :production do
+          url "https://example.com"
+        end
+        backup do
+          s3 "primary", path: "secret-bucket/foo", region: "us-west-2", access_key_id: "SECRET"
+        end
+      RUBY
 
       header "Authorization", "Bearer #{generate_token}"
       get "/config"
@@ -201,8 +198,12 @@ RSpec.describe Bard::Api::App do
     end
 
     it "serializes a disabled backup" do
-      backup = Bard::BackupConfig.new { disabled }
-      stub_bard_config(backup: backup, production_pings: ["https://example.com"])
+      stub_bard_config(<<~RUBY)
+        target :production do
+          url "https://example.com"
+        end
+        backup false
+      RUBY
 
       header "Authorization", "Bearer #{generate_token}"
       get "/config"
@@ -214,9 +215,10 @@ RSpec.describe Bard::Api::App do
       expect(json["backup"]["self_managed"]).to eq(false)
     end
 
-    it "omits production server when none configured" do
-      backup = Bard::BackupConfig.new { bard }
-      stub_bard_config(backup: backup, production_pings: nil)
+    it "omits production server when none is explicitly configured (no staging fallback)" do
+      stub_bard_config(<<~RUBY)
+        backup { bard }
+      RUBY
 
       header "Authorization", "Bearer #{generate_token}"
       get "/config"
