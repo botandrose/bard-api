@@ -4,8 +4,6 @@ require "rack"
 require "json"
 require_relative "auth"
 require "bard/backup"
-require "bard/plugins/backup"
-require "bard/plugins/encrypt"
 
 module Bard
   module Api
