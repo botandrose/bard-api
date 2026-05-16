@@ -37,11 +37,15 @@ module Bard
 
       def create_backup(request)
         with_auth(request) do |payload|
+          s3 = payload["s3"].transform_keys(&:to_sym)
+          project_name = Bard::Config.current.project_name
+
           backup = Bard::Backup.create!(
-            name: "bard",
-            type: :upload,
-            urls: payload["urls"]
+            type: :s3,
+            path: "bard-backup/#{project_name}",
+            **s3,
           )
+
           json_response(200, backup.as_json)
         end
       end

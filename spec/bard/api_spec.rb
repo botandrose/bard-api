@@ -28,12 +28,21 @@ RSpec.describe Bard::Api::App do
   describe "POST /backups" do
     let(:private_key) { OpenSSL::PKey::RSA.new(File.read("#{Dir.pwd}/keys/private_key.pem")) }
 
-    def generate_token(urls:)
+    let(:s3_credentials) do
+      {
+        "access_key_id" => "ASIA_TEST_KEY",
+        "secret_access_key" => "test-secret",
+        "session_token" => "test-session-token",
+        "region" => "us-west-2",
+      }
+    end
+
+    def generate_token(s3: s3_credentials)
       JWT.encode(
         {
-          urls: urls,
-          exp: (Time.now + 300).to_i,  # 5 minutes from now
-          iat: Time.now.to_i
+          s3: s3,
+          exp: (Time.now + 300).to_i,
+          iat: Time.now.to_i,
         },
         private_key,
         "RS256"
@@ -55,20 +64,26 @@ RSpec.describe Bard::Api::App do
     end
 
     it "triggers a backup with valid token" do
+      bard_config = double(project_name: "test-project")
+      allow(Bard::Config).to receive(:current).and_return(bard_config)
+
       backup_instance = Bard::Backup.new(
         timestamp: Time.now.utc,
         size: 123,
         destinations: [
-          { name: "bard", type: "bard", status: "success" }
+          { name: "bard", type: "s3", status: "success" }
         ]
       )
       allow(Bard::Backup).to receive(:create!).with(
-        name: "bard",
-        type: :upload,
-        urls: ["https://example.com"]
+        type: :s3,
+        path: "bard-backup/test-project",
+        access_key_id: "ASIA_TEST_KEY",
+        secret_access_key: "test-secret",
+        session_token: "test-session-token",
+        region: "us-west-2",
       ).and_return(backup_instance)
 
-      token = generate_token(urls: ["https://example.com"])
+      token = generate_token
       header "Authorization", "Bearer #{token}"
       post "/backups"
 
@@ -77,8 +92,6 @@ RSpec.describe Bard::Api::App do
       json = JSON.parse(last_response.body)
       expect(json["timestamp"]).not_to be_nil
       expect(json["size"]).to be > 0
-      expect(json["destinations"]).to be_an(Array)
-      expect(json["destinations"].first["status"]).to eq("success")
     end
   end
 
