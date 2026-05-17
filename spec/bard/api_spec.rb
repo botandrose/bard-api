@@ -160,8 +160,10 @@ RSpec.describe Bard::Api::App do
         target :production do
           ping "https://pep.example.com/health"
         end
-        backup { bard }
-        encrypt true
+        backup do
+          bard
+          encrypt true
+        end
       RUBY
 
       header "Authorization", "Bearer #{generate_token}"
