@@ -74,7 +74,7 @@ module Bard
             enabled: backup.enabled?,
             bard_managed: backup.bard?,
             self_managed: backup.self_managed?,
-            encryption_enabled: !!bard_config.encrypt,
+            encryption_enabled: !!backup.encrypt,
             destinations: backup.destinations.map { |d| { name: d[:name], type: d[:type] } },
           },
           servers: production ? { production: { pings: production.ping } } : {},

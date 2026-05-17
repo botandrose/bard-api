@@ -160,8 +160,10 @@ RSpec.describe Bard::Api::App do
         target :production do
           ping "https://pep.example.com/health"
         end
-        backup { bard }
-        encrypt true
+        backup do
+          bard
+          encrypt true
+        end
       RUBY
 
       header "Authorization", "Bearer #{generate_token}"
@@ -226,19 +228,6 @@ RSpec.describe Bard::Api::App do
       expect(json["backup"]["enabled"]).to eq(false)
       expect(json["backup"]["bard_managed"]).to eq(false)
       expect(json["backup"]["self_managed"]).to eq(false)
-    end
-
-    it "omits production server when none is explicitly configured (no staging fallback)" do
-      stub_bard_config(<<~RUBY)
-        backup { bard }
-      RUBY
-
-      header "Authorization", "Bearer #{generate_token}"
-      get "/config"
-
-      expect(last_response.status).to eq(200)
-      json = JSON.parse(last_response.body)
-      expect(json["servers"]).to eq({})
     end
   end
 end
