@@ -8,6 +8,16 @@ require "bard/backup"
 module Bard
   module Api
     class App
+      class << self
+        attr_writer :backup_runner
+
+        # Runs the backup task out-of-band so the request returns immediately.
+        # Override to wire backups into a project's own job queue.
+        def backup_runner
+          @backup_runner ||= ->(task) { Thread.new { task.call } }
+        end
+      end
+
       def call(env)
         request = Rack::Request.new(env)
         method = request.request_method
@@ -40,13 +50,30 @@ module Bard
           s3 = payload["s3"].transform_keys(&:to_sym)
           project_name = Bard::Config.current.project_name
 
-          backup = Bard::Backup.create!(
-            type: :s3,
-            path: "bard-backup/#{project_name}",
-            **s3,
-          )
+          self.class.backup_runner.call(-> { run_backup(project_name, s3) })
 
-          json_response(200, backup.as_json)
+          json_response(202, { status: "started" })
+        end
+      end
+
+      def run_backup(project_name, s3)
+        Bard::Backup.create!(
+          type: :s3,
+          path: "bard-backup/#{project_name}",
+          **s3,
+        )
+      rescue => e
+        log_backup_error(e)
+      end
+
+      def log_backup_error(error)
+        message = "[bard-api] backup failed: #{error.class}: #{error.message}"
+        if defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger
+          Rails.logger.error(message)
+          Rails.logger.error(error.backtrace.join("\n")) if error.backtrace
+        else
+          warn message
+          warn error.backtrace.join("\n") if error.backtrace
         end
       end
 

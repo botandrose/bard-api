@@ -49,6 +49,15 @@ RSpec.describe Bard::Api::App do
       )
     end
 
+    before do
+      # Run the backup synchronously in tests so expectations are deterministic.
+      Bard::Api::App.backup_runner = ->(task) { task.call }
+    end
+
+    after do
+      Bard::Api::App.backup_runner = nil
+    end
+
     it "returns 401 without authentication" do
       post "/backups"
       expect(last_response.status).to eq(401)
@@ -63,35 +72,40 @@ RSpec.describe Bard::Api::App do
       expect(last_response.status).to eq(401)
     end
 
-    it "triggers a backup with valid token" do
+    it "accepts the request and triggers the backup out-of-band" do
       bard_config = double(project_name: "test-project")
       allow(Bard::Config).to receive(:current).and_return(bard_config)
 
-      backup_instance = Bard::Backup.new(
-        timestamp: Time.now.utc,
-        size: 123,
-        destinations: [
-          { name: "bard", type: "s3", status: "success" }
-        ]
-      )
-      allow(Bard::Backup).to receive(:create!).with(
+      expect(Bard::Backup).to receive(:create!).with(
         type: :s3,
         path: "bard-backup/test-project",
         access_key_id: "ASIA_TEST_KEY",
         secret_access_key: "test-secret",
         session_token: "test-session-token",
         region: "us-west-2",
-      ).and_return(backup_instance)
+      )
 
       token = generate_token
       header "Authorization", "Bearer #{token}"
       post "/backups"
 
-      expect(last_response.status).to eq(200)
+      expect(last_response.status).to eq(202)
 
       json = JSON.parse(last_response.body)
-      expect(json["timestamp"]).not_to be_nil
-      expect(json["size"]).to be > 0
+      expect(json["status"]).to eq("started")
+    end
+
+    it "still returns 202 when the out-of-band backup fails, logging the error" do
+      bard_config = double(project_name: "test-project")
+      allow(Bard::Config).to receive(:current).and_return(bard_config)
+      allow(Bard::Backup).to receive(:create!).and_raise(RuntimeError, "boom")
+
+      token = generate_token
+      header "Authorization", "Bearer #{token}"
+
+      expect { post "/backups" }.to output(/backup failed.*boom/m).to_stderr
+
+      expect(last_response.status).to eq(202)
     end
   end
 
