@@ -244,4 +244,58 @@ RSpec.describe Bard::Api::App do
       expect(json["backup"]["self_managed"]).to eq(false)
     end
   end
+
+  describe "POST /deploy" do
+    before do
+      # Capture the command instead of spawning a real detached deploy.
+      Bard::Api::App.deploy_runner = ->(command) { @deploy_command = command }
+      allow_any_instance_of(Bard::Api::App).to receive(:current_sha).and_return("cafe1234")
+      allow_any_instance_of(Bard::Api::App).to receive(:deploy_in_progress?).and_return(false)
+    end
+
+    after do
+      Bard::Api::App.deploy_runner = nil
+    end
+
+    it "no-ops when prod is already at the requested sha" do
+      post "/deploy", { sha: "cafe1234" }.to_json
+
+      expect(last_response.status).to eq(200)
+      expect(JSON.parse(last_response.body)).to eq("status" => "noop", "sha" => "cafe1234")
+      expect(@deploy_command).to be_nil
+    end
+
+    it "hands the deploy off out-of-band and returns 202" do
+      post "/deploy", { sha: "deadbeef" }.to_json
+
+      expect(last_response.status).to eq(202)
+      expect(JSON.parse(last_response.body)).to eq("status" => "deploying", "sha" => "cafe1234")
+      expect(@deploy_command).to include("git pull --ff-only origin master")
+      expect(@deploy_command).to include("bin/setup")
+    end
+
+    it "returns 409 without starting a second deploy when one is already running" do
+      allow_any_instance_of(Bard::Api::App).to receive(:deploy_in_progress?).and_return(true)
+
+      post "/deploy", { sha: "deadbeef" }.to_json
+
+      expect(last_response.status).to eq(409)
+      expect(JSON.parse(last_response.body)).to eq("status" => "deploying", "sha" => "cafe1234")
+      expect(@deploy_command).to be_nil
+    end
+  end
+
+  describe ".spawn_detached_deploy" do
+    it "runs the deploy in its own systemd --user scope so it survives the app restart" do
+      allow(Process).to receive(:spawn).and_return(4321)
+      allow(Process).to receive(:detach)
+
+      Bard::Api::App.spawn_detached_deploy("do-deploy")
+
+      expect(Process).to have_received(:spawn).with(
+        "systemd-run", "--user", "--scope", "--collect", "--quiet", "bash", "-lc", "do-deploy",
+        hash_including(:in => "/dev/null"),
+      )
+    end
+  end
 end

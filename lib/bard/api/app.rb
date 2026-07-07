@@ -9,14 +9,33 @@ module Bard
   module Api
     class App
       class << self
-        attr_writer :backup_runner
+        attr_writer :backup_runner, :deploy_runner
 
         # Runs the backup task out-of-band so the request returns immediately.
         # Override to wire backups into a project's own job queue.
         def backup_runner
           @backup_runner ||= ->(task) { Thread.new { task.call } }
         end
+
+        # bin/setup restarts Puma via `procsd restart` → `systemctl --user restart`, which
+        # SIGKILLs the app unit's whole cgroup. So the deploy can't run in this worker (or any
+        # plain child of it) — it'd be killed mid-deploy. We run it in its own systemd --user
+        # scope: a separate cgroup that survives the restart.
+        def deploy_runner
+          @deploy_runner ||= method(:spawn_detached_deploy)
+        end
+
+        def spawn_detached_deploy(command)
+          pid = Process.spawn(
+            "systemd-run", "--user", "--scope", "--collect", "--quiet", "bash", "-lc", command,
+            :in => "/dev/null", %i[out err] => ["log/bard-deploy.log", "a"],
+          )
+          Process.detach(pid)
+        end
       end
+
+      DEPLOY_LOCK = "tmp/bard-deploy.lock"
+      DEPLOY_COMMAND = "flock -n #{DEPLOY_LOCK} -c 'git pull --ff-only origin master && bin/setup'"
 
       def call(env)
         request = Rack::Request.new(env)
@@ -32,6 +51,8 @@ module Bard
           latest_backup(request)
         when ["GET", "/config"]
           config(request)
+        when ["POST", "/deploy"]
+          create_deploy(request)
         else
           not_found
         end
@@ -89,6 +110,35 @@ module Bard
       def config(request)
         with_auth(request) do
           json_response(200, serialize_config(Bard::Config.current))
+        end
+      end
+
+      # Unauthenticated on purpose: it can only fast-forward prod to origin/master (master IS prod)
+      # and is a no-op when already there.
+      #
+      # bin/setup restarts Puma, so we can't run the deploy in this worker thread — the restart
+      # would kill it mid-flight. We hand off to an out-of-band process (its own systemd scope,
+      # see .deploy_runner), serialize concurrent deploys with an flock, and return 202
+      # immediately. The caller polls until HEAD == sha.
+      def create_deploy(request)
+        target = JSON.parse(request.body.read)["sha"]
+        sha = current_sha
+        return json_response(200, { status: "noop", sha: sha }) if target == sha
+        return json_response(409, { status: "deploying", sha: sha }) if deploy_in_progress?
+
+        self.class.deploy_runner.call(DEPLOY_COMMAND)
+        json_response(202, { status: "deploying", sha: sha })
+      end
+
+      def current_sha
+        `git rev-parse HEAD`.chomp
+      end
+
+      def deploy_in_progress?
+        File.open(DEPLOY_LOCK, File::RDWR | File::CREAT, 0o644) do |lock|
+          acquired = lock.flock(File::LOCK_EX | File::LOCK_NB)
+          lock.flock(File::LOCK_UN) if acquired
+          !acquired
         end
       end
 
