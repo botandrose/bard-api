@@ -11,19 +11,20 @@ The bard-api gem enables BARD Tracker to manage Rails applications through a RES
 
 ## Usage
 
-### Mounting in Rails
+### Mounting
 
-Add to your `config/routes.rb`:
+With `bard-rails` this mounts automatically at `/bard` — nothing to do. Otherwise add to your
+`config/routes.rb`:
 
 ```ruby
-mount Bard::Api::App.new => "/bard-api"
+mount Bard::Api::App.new => "/bard"
 ```
 
-This makes the API available at `/bard-api/*` endpoints.
+Either way the API is served at `/bard/*`.
 
 ### Endpoints
 
-#### GET /bard-api/health
+#### GET /bard/health
 
 Health check endpoint (no authentication required).
 
@@ -34,7 +35,7 @@ Health check endpoint (no authentication required).
 }
 ```
 
-#### POST /bard-api/backups
+#### POST /bard/backups
 
 Trigger a backup (requires JWT authentication).
 
@@ -67,7 +68,7 @@ Authorization: Bearer <jwt-token>
 }
 ```
 
-#### GET /bard-api/backups/latest
+#### GET /bard/backups/latest
 
 Get status of most recent backup (requires JWT authentication).
 
@@ -98,7 +99,7 @@ Authorization: Bearer <jwt-token>
 }
 ```
 
-#### GET /bard-api/config
+#### GET /bard/config
 
 Read the project's live backup and uptime configuration (requires JWT authentication). Used by axis to discover what each project actually has deployed.
 
