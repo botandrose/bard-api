@@ -272,6 +272,8 @@ RSpec.describe Bard::Api::App do
       expect(JSON.parse(last_response.body)).to eq("status" => "deploying", "sha" => "cafe1234")
       expect(@deploy_command).to include("git pull --ff-only origin master")
       expect(@deploy_command).to include("bin/setup")
+      # completion is recorded only after bin/setup succeeds
+      expect(@deploy_command).to match(/bin\/setup && git rev-parse HEAD > .*bard-deployed\.sha/)
     end
 
     it "returns 409 without starting a second deploy when one is already running" do
@@ -296,6 +298,34 @@ RSpec.describe Bard::Api::App do
         "systemd-run", "--user", "--scope", "--collect", "--quiet", "bash", "-lc", "do-deploy",
         hash_including(:in => "/dev/null"),
       )
+    end
+
+    it "spawns with a clean bundler env so a lockfile change can't crash bundle install" do
+      ENV["BUNDLE_GEMFILE"] = "/app/Gemfile"
+      seen = :unset
+      allow(Process).to receive(:spawn) { seen = ENV["BUNDLE_GEMFILE"]; 4321 }
+      allow(Process).to receive(:detach)
+
+      Bard::Api::App.spawn_detached_deploy("do-deploy")
+
+      expect(seen).to be_nil
+    ensure
+      ENV.delete("BUNDLE_GEMFILE")
+    end
+  end
+
+  describe "#current_sha" do
+    let(:app) { Bard::Api::App.new }
+
+    it "reads the deployed-sha marker when present" do
+      allow(File).to receive(:exist?).with(Bard::Api::App::DEPLOYED_SHA).and_return(true)
+      allow(File).to receive(:read).with(Bard::Api::App::DEPLOYED_SHA).and_return("abc123\n")
+      expect(app.send(:current_sha)).to eq("abc123")
+    end
+
+    it "is empty when no deploy has completed, so a bare pull never reads as deployed" do
+      allow(File).to receive(:exist?).with(Bard::Api::App::DEPLOYED_SHA).and_return(false)
+      expect(app.send(:current_sha)).to eq("")
     end
   end
 end

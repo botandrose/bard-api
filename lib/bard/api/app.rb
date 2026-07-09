@@ -2,6 +2,7 @@
 
 require "rack"
 require "json"
+require "bundler"
 require_relative "auth"
 require "bard/backup"
 
@@ -25,17 +26,26 @@ module Bard
           @deploy_runner ||= method(:spawn_detached_deploy)
         end
 
+        # with_unbundled_env is essential: this worker runs under the app's bundle
+        # (RUBYOPT=-rbundler/setup, BUNDLE_GEMFILE). Inherited into the deploy, that makes every
+        # ruby command — bundle install included — crash at startup the moment git pull lands a
+        # lockfile with not-yet-installed gems. The deploy must start from a clean env.
         def spawn_detached_deploy(command)
-          pid = Process.spawn(
-            "systemd-run", "--user", "--scope", "--collect", "--quiet", "bash", "-lc", command,
-            :in => "/dev/null", %i[out err] => ["log/bard-deploy.log", "a"],
-          )
-          Process.detach(pid)
+          Bundler.with_unbundled_env do
+            pid = Process.spawn(
+              "systemd-run", "--user", "--scope", "--collect", "--quiet", "bash", "-lc", command,
+              :in => "/dev/null", %i[out err] => ["log/bard-deploy.log", "a"],
+            )
+            Process.detach(pid)
+          end
         end
       end
 
       DEPLOY_LOCK = "tmp/bard-deploy.lock"
-      DEPLOY_COMMAND = "flock -n #{DEPLOY_LOCK} -c 'git pull --ff-only origin master && bin/setup'"
+      DEPLOYED_SHA = "tmp/bard-deployed.sha"
+      # Record the deployed sha only after bin/setup fully succeeds — a bare `git pull` advances
+      # HEAD before the bundle/migrate/restart run, so HEAD alone would read as "done" too early.
+      DEPLOY_COMMAND = "flock -n #{DEPLOY_LOCK} -c 'git pull --ff-only origin master && bin/setup && git rev-parse HEAD > #{DEPLOYED_SHA}'"
 
       def call(env)
         request = Rack::Request.new(env)
@@ -130,8 +140,12 @@ module Bard
         json_response(202, { status: "deploying", sha: sha })
       end
 
+      # The last FULLY deployed sha (bin/setup succeeded), not merely where git HEAD points.
+      # Absent marker => nothing has completed yet, so it can never match the requested sha and
+      # the caller keeps polling until bin/setup writes it — or times out on a real failure.
       def current_sha
-        `git rev-parse HEAD`.chomp
+        return "" unless File.exist?(DEPLOYED_SHA)
+        File.read(DEPLOYED_SHA).chomp
       end
 
       def deploy_in_progress?
