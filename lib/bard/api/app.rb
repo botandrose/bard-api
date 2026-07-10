@@ -32,7 +32,10 @@ module Bard
         # lockfile with not-yet-installed gems. The deploy must start from a clean env.
         def spawn_detached_deploy(command)
           Bundler.with_unbundled_env do
+            # A Passenger web worker is spawned without a login session, so it has no XDG_RUNTIME_DIR;
+            # systemd-run --user needs it to find the (linger-backed) user bus at $XDG_RUNTIME_DIR/bus.
             pid = Process.spawn(
+              { "XDG_RUNTIME_DIR" => "/run/user/#{Process.uid}" },
               "systemd-run", "--user", "--scope", "--collect", "--quiet", "bash", "-lc", command,
               :in => "/dev/null", %i[out err] => ["log/bard-deploy.log", "a"],
             )

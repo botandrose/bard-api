@@ -325,6 +325,7 @@ RSpec.describe Bard::Api::App do
       Bard::Api::App.spawn_detached_deploy("do-deploy")
 
       expect(Process).to have_received(:spawn).with(
+        hash_including("XDG_RUNTIME_DIR" => "/run/user/#{Process.uid}"),
         "systemd-run", "--user", "--scope", "--collect", "--quiet", "bash", "-lc", "do-deploy",
         hash_including(:in => "/dev/null"),
       )
