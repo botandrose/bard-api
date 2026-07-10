@@ -251,6 +251,8 @@ RSpec.describe Bard::Api::App do
       Bard::Api::App.deploy_runner = ->(command) { @deploy_command = command }
       allow_any_instance_of(Bard::Api::App).to receive(:current_sha).and_return("cafe1234")
       allow_any_instance_of(Bard::Api::App).to receive(:deploy_in_progress?).and_return(false)
+      allow_any_instance_of(Bard::Api::App).to receive(:failed_sha).and_return("")
+      allow_any_instance_of(Bard::Api::App).to receive(:recently_failed?).and_return(false)
     end
 
     after do
@@ -274,6 +276,8 @@ RSpec.describe Bard::Api::App do
       expect(@deploy_command).to include("bin/setup")
       # completion is recorded only after bin/setup succeeds
       expect(@deploy_command).to match(/bin\/setup && git rev-parse HEAD > .*bard-deployed\.sha/)
+      # a failed attempt stamps the sha so the caller stops polling instead of re-spawning
+      expect(@deploy_command).to match(/\|\| git rev-parse origin\/master > .*bard-deploy-failed\.sha/)
     end
 
     it "returns 409 without starting a second deploy when one is already running" do
@@ -284,6 +288,32 @@ RSpec.describe Bard::Api::App do
       expect(last_response.status).to eq(409)
       expect(JSON.parse(last_response.body)).to eq("status" => "deploying", "sha" => "cafe1234")
       expect(@deploy_command).to be_nil
+    end
+
+    it "reports the failure without re-spawning when this sha just failed" do
+      allow_any_instance_of(Bard::Api::App).to receive(:failed_sha).and_return("deadbeef")
+      allow_any_instance_of(Bard::Api::App).to receive(:recently_failed?).and_return(true)
+      allow_any_instance_of(Bard::Api::App).to receive(:deploy_log_tail).and_return("boom: bin/setup failed\n")
+
+      post "/deploy", { sha: "deadbeef" }.to_json
+
+      expect(last_response.status).to eq(500)
+      json = JSON.parse(last_response.body)
+      expect(json["status"]).to eq("failed")
+      expect(json["error"]).to include("bard-deploy.log")
+      expect(json["log"]).to include("boom")
+      expect(@deploy_command).to be_nil
+    end
+
+    it "retries the same sha once the failure cooldown has elapsed" do
+      allow_any_instance_of(Bard::Api::App).to receive(:failed_sha).and_return("deadbeef")
+      allow_any_instance_of(Bard::Api::App).to receive(:recently_failed?).and_return(false)
+
+      post "/deploy", { sha: "deadbeef" }.to_json
+
+      expect(last_response.status).to eq(202)
+      expect(JSON.parse(last_response.body)).to eq("status" => "deploying", "sha" => "cafe1234")
+      expect(@deploy_command).not_to be_nil
     end
   end
 

@@ -43,9 +43,21 @@ module Bard
 
       DEPLOY_LOCK = "tmp/bard-deploy.lock"
       DEPLOYED_SHA = "tmp/bard-deployed.sha"
+      FAILED_SHA = "tmp/bard-deploy-failed.sha"
+      DEPLOY_LOG = "log/bard-deploy.log"
+      # How long a failed sha short-circuits re-deploy: long enough to end the caller's poll loop
+      # without a re-spawn, short enough that a fresh `bard deploy` run can retry the same sha.
+      FAILED_COOLDOWN = 60
+
       # Record the deployed sha only after bin/setup fully succeeds — a bare `git pull` advances
       # HEAD before the bundle/migrate/restart run, so HEAD alone would read as "done" too early.
-      DEPLOY_COMMAND = "flock -n #{DEPLOY_LOCK} -c 'git pull --ff-only origin master && bin/setup && git rev-parse HEAD > #{DEPLOYED_SHA}'"
+      # On any failure, stamp the attempted sha so we don't re-spawn (and restart Puma) on every
+      # poll; the marker is written inside the flock, so it's on disk before the lock releases.
+      DEPLOY_COMMAND =
+        "flock -n #{DEPLOY_LOCK} -c '" \
+          "rm -f #{FAILED_SHA}; " \
+          "git pull --ff-only origin master && bin/setup && git rev-parse HEAD > #{DEPLOYED_SHA} " \
+          "|| git rev-parse origin/master > #{FAILED_SHA}'"
 
       def call(env)
         request = Rack::Request.new(env)
@@ -136,6 +148,17 @@ module Bard
         return json_response(200, { status: "noop", sha: sha }) if target == sha
         return json_response(409, { status: "deploying", sha: sha }) if deploy_in_progress?
 
+        # A prior attempt at this exact sha just failed. Report it instead of re-spawning the
+        # deploy on every poll (which would restart Puma every few seconds and never converge).
+        if target == failed_sha && recently_failed?
+          return json_response(500, {
+            status: "failed",
+            sha: sha,
+            error: "deploy failed on the server; see #{DEPLOY_LOG}",
+            log: deploy_log_tail,
+          })
+        end
+
         self.class.deploy_runner.call(DEPLOY_COMMAND)
         json_response(202, { status: "deploying", sha: sha })
       end
@@ -146,6 +169,21 @@ module Bard
       def current_sha
         return "" unless File.exist?(DEPLOYED_SHA)
         File.read(DEPLOYED_SHA).chomp
+      end
+
+      # The sha whose deploy most recently failed (bin/setup or the git pull errored out).
+      def failed_sha
+        return "" unless File.exist?(FAILED_SHA)
+        File.read(FAILED_SHA).chomp
+      end
+
+      def recently_failed?
+        File.exist?(FAILED_SHA) && (Time.now - File.mtime(FAILED_SHA)) < FAILED_COOLDOWN
+      end
+
+      def deploy_log_tail(lines = 30)
+        return "" unless File.exist?(DEPLOY_LOG)
+        File.readlines(DEPLOY_LOG).last(lines).join
       end
 
       def deploy_in_progress?
