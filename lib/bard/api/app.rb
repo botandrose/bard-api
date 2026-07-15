@@ -26,21 +26,31 @@ module Bard
           @deploy_runner ||= method(:spawn_detached_deploy)
         end
 
-        # with_unbundled_env is essential: this worker runs under the app's bundle
+        # The deploy must start from a clean env: this worker runs under the app's bundle
         # (RUBYOPT=-rbundler/setup, BUNDLE_GEMFILE). Inherited into the deploy, that makes every
-        # ruby command — bundle install included — crash at startup the moment git pull lands a
-        # lockfile with not-yet-installed gems. The deploy must start from a clean env.
+        # ruby command — bin/setup and bundle install included — crash at startup the moment
+        # git pull lands a lockfile with not-yet-installed gems.
         def spawn_detached_deploy(command)
           Bundler.with_unbundled_env do
-            # A Passenger web worker is spawned without a login session, so it has no XDG_RUNTIME_DIR;
-            # systemd-run --user needs it to find the (linger-backed) user bus at $XDG_RUNTIME_DIR/bus.
             pid = Process.spawn(
-              { "XDG_RUNTIME_DIR" => "/run/user/#{Process.uid}" },
+              deploy_env,
               "systemd-run", "--user", "--scope", "--collect", "--quiet", "bash", "-lc", command,
               :in => "/dev/null", %i[out err] => ["log/bard-deploy.log", "a"],
             )
             Process.detach(pid)
           end
+        end
+
+        # with_unbundled_env alone isn't enough: it restores Bundler::ORIGINAL_ENV, and under
+        # Passenger RUBYOPT=-rbundler/setup is injected before the app boots, so it's part of
+        # ORIGINAL_ENV and survives the scrub (took brianporter.com down on 2026-07-15). Strip
+        # the bundler vars explicitly — nil values remove them from the spawned env.
+        # XDG_RUNTIME_DIR: a Passenger web worker is spawned without a login session, so it's
+        # unset; systemd-run --user needs it to find the (linger-backed) user bus.
+        def deploy_env
+          bundler_vars = ENV.keys.grep(/\A(BUNDLE_|BUNDLER_)/) + %w[RUBYOPT RUBYLIB]
+          bundler_vars.to_h { |key| [key, nil] }
+            .merge("XDG_RUNTIME_DIR" => "/run/user/#{Process.uid}")
         end
       end
 

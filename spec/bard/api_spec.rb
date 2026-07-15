@@ -343,6 +343,30 @@ RSpec.describe Bard::Api::App do
     ensure
       ENV.delete("BUNDLE_GEMFILE")
     end
+
+    it "strips bundler vars that with_unbundled_env preserves because Passenger set them pre-boot" do
+      allow(Bundler).to receive(:with_unbundled_env) do |&block|
+        ENV["RUBYOPT"] = "-r bundler/setup"
+        ENV["BUNDLE_BIN_PATH"] = "/gems/bundler/exe/bundle"
+        begin
+          block.call
+        ensure
+          ENV.delete("RUBYOPT")
+          ENV.delete("BUNDLE_BIN_PATH")
+        end
+      end
+      spawn_env = nil
+      allow(Process).to receive(:spawn) { |env, *| spawn_env = env; 4321 }
+      allow(Process).to receive(:detach)
+
+      Bard::Api::App.spawn_detached_deploy("do-deploy")
+
+      expect(spawn_env).to include(
+        "RUBYOPT" => nil,
+        "RUBYLIB" => nil,
+        "BUNDLE_BIN_PATH" => nil,
+      )
+    end
   end
 
   describe "#current_sha" do
