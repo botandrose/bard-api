@@ -66,11 +66,15 @@ module Bard
       # HEAD before the bundle/migrate/restart run, so HEAD alone would read as "done" too early.
       # On any failure, stamp the attempted sha so we don't re-spawn (and restart Puma) on every
       # poll; the marker is written inside the flock, so it's on disk before the lock releases.
+      # Then roll the tree back to the pre-pull sha: code sitting ahead of its installed gems is
+      # a time bomb — the next app-process respawn (e.g. an nginx reload) can't boot and the
+      # site 500s until someone intervenes. Better to keep running the old code.
       DEPLOY_COMMAND =
         "flock -n #{DEPLOY_LOCK} -c '" \
           "rm -f #{FAILED_SHA}; " \
+          "before=$(git rev-parse HEAD); " \
           "git pull --ff-only origin master && bin/setup && git rev-parse HEAD > #{DEPLOYED_SHA} " \
-          "|| git rev-parse origin/master > #{FAILED_SHA}'"
+          "|| { git rev-parse origin/master > #{FAILED_SHA}; git reset --hard \"$before\"; }'"
 
       def call(env)
         request = Rack::Request.new(env)

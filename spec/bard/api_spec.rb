@@ -277,7 +277,10 @@ RSpec.describe Bard::Api::App do
       # completion is recorded only after bin/setup succeeds
       expect(@deploy_command).to match(/bin\/setup && git rev-parse HEAD > .*bard-deployed\.sha/)
       # a failed attempt stamps the sha so the caller stops polling instead of re-spawning
-      expect(@deploy_command).to match(/\|\| git rev-parse origin\/master > .*bard-deploy-failed\.sha/)
+      expect(@deploy_command).to match(/\|\| \{ git rev-parse origin\/master > .*bard-deploy-failed\.sha/)
+      # and rolls the tree back so code never sits ahead of the installed gems
+      expect(@deploy_command).to include('before=$(git rev-parse HEAD)')
+      expect(@deploy_command).to include('git reset --hard "$before"')
     end
 
     it "returns 409 without starting a second deploy when one is already running" do
