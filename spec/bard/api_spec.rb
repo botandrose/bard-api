@@ -176,7 +176,6 @@ RSpec.describe Bard::Api::App do
         end
         backup do
           bard
-          encrypt true
         end
       RUBY
 
@@ -192,7 +191,7 @@ RSpec.describe Bard::Api::App do
           "enabled" => true,
           "bard_managed" => true,
           "self_managed" => false,
-          "encryption_enabled" => true,
+          "encryption_enabled" => false,
           "destinations" => [],
         },
         "servers" => {
@@ -224,6 +223,22 @@ RSpec.describe Bard::Api::App do
       ])
       expect(last_response.body).not_to include("secret-bucket")
       expect(last_response.body).not_to include("SECRET")
+    end
+
+    it "reports encryption as enabled when a destination carries an encryption key" do
+      stub_bard_config(<<~RUBY)
+        backup do
+          s3 "primary", path: "bucket/foo", encryption_key: "SUPERSECRETKEY"
+        end
+      RUBY
+
+      header "Authorization", "Bearer #{generate_token}"
+      get "/config"
+
+      expect(last_response.status).to eq(200)
+      json = JSON.parse(last_response.body)
+      expect(json["backup"]["encryption_enabled"]).to eq(true)
+      expect(last_response.body).not_to include("SUPERSECRETKEY")
     end
 
     it "serializes a disabled backup" do

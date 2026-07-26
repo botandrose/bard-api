@@ -220,7 +220,7 @@ module Bard
             enabled: backup.enabled?,
             bard_managed: backup.bard?,
             self_managed: backup.self_managed?,
-            encryption_enabled: !!backup.encrypt,
+            encryption_enabled: Bard::Backup::Destination.resolve(backup.destinations).any?(&:encryption_key),
             destinations: backup.destinations.map { |d| { name: d[:name], type: d[:type] } },
           },
           servers: production ? { production: { pings: production.ping } } : {},
