@@ -34,7 +34,8 @@ Gem::Specification.new do |spec|
   spec.add_dependency "jwt"
   spec.add_dependency "rack"
   spec.add_dependency "backhoe"
-  spec.add_dependency "bard", ">= 2.0"
+  # bard (config core) is never referenced here; bard-backup pulls it in where it is
+  # actually used. Declaring it only forced the config core into every app bundle.
   spec.add_dependency "bard-backup", ">= 0.15"
 
   # Development dependencies
