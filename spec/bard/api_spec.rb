@@ -6,6 +6,13 @@ RSpec.describe Bard::Api do
   it "has a version number" do
     expect(Bard::Api::VERSION).not_to be nil
   end
+
+  it "leaves bard-backup, and the ActiveRecord it pulls in via backhoe, unloaded until a backup endpoint needs them" do
+    script = 'require "bard/api"; print defined?(Bard::Backup).inspect, " ", defined?(ActiveRecord).inspect'
+    output = IO.popen([RbConfig.ruby, "-Ilib", "-e", script], &:read)
+
+    expect(output).to eq "nil nil"
+  end
 end
 
 RSpec.describe Bard::Api::App do

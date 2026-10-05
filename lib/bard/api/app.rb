@@ -4,7 +4,6 @@ require "rack"
 require "json"
 require "bundler"
 require_relative "auth"
-require "bard/backup"
 
 module Bard
   module Api
@@ -106,6 +105,8 @@ module Bard
       end
 
       def create_backup(request)
+        # Loaded per endpoint: bard-backup pulls in ActiveRecord via backhoe, which a database-less app can't boot with.
+        require "bard/backup"
         with_auth(request) do |payload|
           s3 = payload["s3"].transform_keys(&:to_sym)
           project_name = Bard::Config.current.project_name
@@ -138,6 +139,7 @@ module Bard
       end
 
       def latest_backup(request)
+        require "bard/backup"
         with_auth(request) do
           backup = Bard::Backup.latest
           json_response(200, backup.as_json)
@@ -147,6 +149,7 @@ module Bard
       end
 
       def config(request)
+        require "bard/backup"
         with_auth(request) do
           json_response(200, serialize_config(Bard::Config.current))
         end
