@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require "jwt"
+require "socket"
+require "tmpdir"
 
 RSpec.describe Bard::Api do
   it "has a version number" do
@@ -354,6 +356,26 @@ RSpec.describe Bard::Api::App do
         "systemd-run", "--user", "--scope", "--collect", "--quiet", "bash", "-lc", "do-deploy",
         hash_including(:in => "/dev/null"),
       )
+    end
+
+    # After a hot restart Puma's listener survives exec, and a deploy holding it blocks its own restart.
+    it "doesn't let the deploy inherit the app's listening socket" do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          Dir.mkdir("log")
+          listener = TCPServer.new("127.0.0.1", 0)
+          listener.close_on_exec = false
+          File.write("systemd-run", "#!/bin/bash\n[ -e /proc/$$/fd/#{listener.fileno} ] && echo leaked > fds || echo closed > fds\n")
+          File.chmod(0o755, "systemd-run")
+          allow(Bard::Api::App).to receive(:deploy_env).and_return("PATH" => "#{dir}:#{ENV["PATH"]}")
+
+          Bard::Api::App.spawn_detached_deploy("do-deploy").join
+
+          expect(File.read("fds")).to eq "closed\n"
+        ensure
+          listener&.close
+        end
+      end
     end
 
     it "spawns with a clean bundler env so a lockfile change can't crash bundle install" do

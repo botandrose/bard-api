@@ -31,10 +31,11 @@ module Bard
         # git pull lands a lockfile with not-yet-installed gems.
         def spawn_detached_deploy(command)
           Bundler.with_unbundled_env do
+            # After a Puma hot restart its listener survives exec; held here, it'd block the deploy's own restart.
             pid = Process.spawn(
               deploy_env,
               "systemd-run", "--user", "--scope", "--collect", "--quiet", "bash", "-lc", command,
-              :in => "/dev/null", %i[out err] => ["log/bard-deploy.log", "a"],
+              :in => "/dev/null", %i[out err] => ["log/bard-deploy.log", "a"], close_others: true,
             )
             Process.detach(pid)
           end
