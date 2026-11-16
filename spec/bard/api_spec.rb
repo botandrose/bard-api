@@ -35,7 +35,7 @@ RSpec.describe Bard::Api::App do
   end
 
   describe "POST /backups" do
-    let(:private_key) { OpenSSL::PKey::RSA.new(File.read("#{Dir.pwd}/keys/private_key.pem")) }
+    let(:private_key) { TEST_PRIVATE_KEY }
 
     let(:s3_credentials) do
       {
@@ -119,7 +119,7 @@ RSpec.describe Bard::Api::App do
   end
 
   describe "GET /backups/latest" do
-    let(:private_key) { OpenSSL::PKey::RSA.new(File.read("#{Dir.pwd}/keys/private_key.pem")) }
+    let(:private_key) { TEST_PRIVATE_KEY }
 
     def generate_token
       JWT.encode(
@@ -152,7 +152,7 @@ RSpec.describe Bard::Api::App do
   end
 
   describe "GET /config" do
-    let(:private_key) { OpenSSL::PKey::RSA.new(File.read("#{Dir.pwd}/keys/private_key.pem")) }
+    let(:private_key) { TEST_PRIVATE_KEY }
 
     def generate_token
       JWT.encode(
