@@ -344,6 +344,92 @@ RSpec.describe Bard::Api::App do
     end
   end
 
+  describe "POST /deploy when master has moved past the requested sha" do
+    around do |example|
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          git "init", "--quiet", "--bare", "--initial-branch=master", "origin.git"
+          git "clone", "--quiet", "origin.git", "dev"
+          Dir.mkdir("dev/bin")
+          File.write("dev/bin/setup", "#!/bin/bash\necho ran >> log/setup.log\n[ ! -e broken ]\n")
+          File.chmod(0o755, "dev/bin/setup")
+          push_commit
+          git "clone", "--quiet", "origin.git", "prod"
+          Dir.chdir("prod") do
+            %w[tmp log].each { |name| Dir.mkdir(name) }
+            example.run
+          end
+        end
+      end
+    end
+
+    before do
+      Bard::Api::App.deploy_runner = ->(command) { system("bash", "-c", command, %i[out err] => File::NULL) }
+    end
+
+    after do
+      Bard::Api::App.deploy_runner = nil
+    end
+
+    def git(*args, chdir: ".")
+      system("git", "-c", "user.name=Test", "-c", "user.email=test@example.com", *args, chdir: chdir, exception: true, %i[out err] => File::NULL)
+    end
+
+    def push_commit(dev = "dev")
+      git "add", "--all", chdir: dev
+      git "commit", "--quiet", "--allow-empty", "--message=change", chdir: dev
+      git "push", "--quiet", "origin", "master", chdir: dev
+      IO.popen(%w[git rev-parse HEAD], chdir: dev, &:read).chomp
+    end
+
+    def deploy(sha)
+      post "/deploy", { sha: sha }.to_json
+      JSON.parse(last_response.body)["status"]
+    end
+
+    def setup_runs
+      File.exist?("log/setup.log") ? File.readlines("log/setup.log").size : 0
+    end
+
+    it "converges on a noop for both shas after a single bin/setup" do
+      superseded = push_commit("../dev")
+      tip = push_commit("../dev")
+
+      expect(deploy(superseded)).to eq("deploying")
+      expect(deploy(superseded)).to eq("noop")
+      expect(deploy(tip)).to eq("noop")
+      expect(setup_runs).to eq(1)
+    end
+
+    it "still deploys a sha that is ahead of the deployed one" do
+      deploy(push_commit("../dev"))
+      ahead = push_commit("../dev")
+
+      expect(deploy(ahead)).to eq("deploying")
+      expect(deploy(ahead)).to eq("noop")
+      expect(setup_runs).to eq(2)
+    end
+
+    it "doesn't rerun bin/setup for an unknown sha when there is nothing new to pull" do
+      deploy(push_commit("../dev"))
+
+      ["f" * 40, "master", "--help", nil].each do |unknown|
+        expect(deploy(unknown)).to eq("deploying")
+      end
+      expect(setup_runs).to eq(1)
+    end
+
+    it "reports the failure for a superseded sha instead of rerunning the failing deploy" do
+      superseded = push_commit("../dev")
+      File.write("../dev/broken", "")
+      push_commit("../dev")
+
+      expect(deploy(superseded)).to eq("deploying")
+      expect(deploy(superseded)).to eq("failed")
+      expect(setup_runs).to eq(1)
+    end
+  end
+
   describe ".spawn_detached_deploy" do
     it "runs the deploy in its own systemd --user scope so it survives the app restart" do
       allow(Process).to receive(:spawn).and_return(4321)

@@ -73,7 +73,9 @@ module Bard
         "flock -n #{DEPLOY_LOCK} -c '" \
           "rm -f #{FAILED_SHA}; " \
           "before=$(git rev-parse HEAD); " \
-          "git pull --ff-only origin master && bin/setup && git rev-parse HEAD > #{DEPLOYED_SHA} " \
+          "git pull --ff-only origin master && " \
+          "{ [ \"$(git rev-parse HEAD)\" = \"$(cat #{DEPLOYED_SHA})\" ] || " \
+          "{ bin/setup && git rev-parse HEAD > #{DEPLOYED_SHA}; }; } " \
           "|| { git rev-parse origin/master > #{FAILED_SHA}; git reset --hard \"$before\"; }'"
 
       def call(env)
@@ -162,16 +164,16 @@ module Bard
       # bin/setup restarts Puma, so we can't run the deploy in this worker thread — the restart
       # would kill it mid-flight. We hand off to an out-of-band process (its own systemd scope,
       # see .deploy_runner), serialize concurrent deploys with an flock, and return 202
-      # immediately. The caller polls until HEAD == sha.
+      # immediately. The caller polls until the deployed sha includes the requested one.
       def create_deploy(request)
         target = JSON.parse(request.body.read)["sha"]
         sha = current_sha
-        return json_response(200, { status: "noop", sha: sha }) if target == sha
+        return json_response(200, { status: "noop", sha: sha }) if includes_commit?(sha, target)
         return json_response(409, { status: "deploying", sha: sha }) if deploy_in_progress?
 
-        # A prior attempt at this exact sha just failed. Report it instead of re-spawning the
+        # A prior attempt that included this sha just failed. Report it instead of re-spawning the
         # deploy on every poll (which would restart Puma every few seconds and never converge).
-        if target == failed_sha && recently_failed?
+        if includes_commit?(failed_sha, target) && recently_failed?
           return json_response(500, {
             status: "failed",
             sha: sha,
@@ -182,6 +184,13 @@ module Bard
 
         self.class.deploy_runner.call(DEPLOY_COMMAND)
         json_response(202, { status: "deploying", sha: sha })
+      end
+
+      # Master can advance past the requested sha mid-poll, so an exact match might never come.
+      def includes_commit?(sha, target)
+        return true if target == sha
+        return false unless [sha, target].all? { |commit| commit.to_s.match?(/\A\h{40}\z/) }
+        system("git", "merge-base", "--is-ancestor", target, sha, err: File::NULL)
       end
 
       # The last FULLY deployed sha (bin/setup succeeded), not merely where git HEAD points.
